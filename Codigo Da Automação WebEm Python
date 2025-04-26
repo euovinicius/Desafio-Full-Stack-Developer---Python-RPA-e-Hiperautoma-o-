@@ -1,0 +1,176 @@
+# 1\. Sobre o Codigo.
+
+# Codigo criado para Automação Web , aonde o codigo faz a seguinte funcoes:
+
+* Acessar o Portal da Transparência e navegar até a consulta de "Pessoas Físicas e Jurídicas".
+* Insere os parâmetros ( Nome, Filtro de Busca , CPF ou NIS)  e realiza a busca.
+* Coletar os dados disponíveis na tela " Pessoa Física - Panorama da relação da pessoa com o Governo Federal".
+* Capturar uma imagem da tela como evidência e convertê-la para Base64.
+* Para cada benefício encontrado (Auxílio Brasil, Auxílio Emergencial, Bolsa Família), acessar os detalhes e coletar as informações.
+* Encerrar a automação e gerar um JSON contendo os dados coletados e a imagem Base64.
+
+
+
+
+import os
+import base64
+import json
+import random
+import time
+from io import BytesIO
+from PIL import Image
+from typing import Optional, List
+from functools import partial
+from concurrent.futures import ProcessPoolExecutor
+
+from playwright.sync_api import sync_playwright, TimeoutError as PlaywrightTimeoutError
+try:
+    from playwright_stealth import stealth_sync
+except ImportError:
+    stealth_sync = None
+
+
+def random_sleep(min_sec: float = 1, max_sec: float = 3) -> None:
+    """
+    Adiciona uma pausa aleatória para simular comportamento humano.
+    """
+    time.sleep(random.uniform(min_sec, max_sec))
+
+
+def consultar_e_abrir_primeiro(termo_busca: str, filtros_refino: Optional[List[str]] = None) -> dict:
+    if filtros_refino is None:
+        filtros_refino = []
+
+    with sync_playwright() as p:
+        browser = p.chromium.launch(
+            headless=True,
+            args=["--no-sandbox", "--disable-dev-shm-usage"]
+        )
+        # Configurações do context
+        ctx_kwargs = {
+            "user_agent": (
+                "Mozilla/5.0 (Windows NT 10.0; Win64; x64) "
+                "AppleWebKit/537.36 (KHTML, like Gecko) "
+                "Chrome/114.0.0.0 Safari/537.36"
+            ),
+            "viewport": {"width": 1920, "height": 1080},
+            "locale": "pt-BR",
+            "timezone_id": "America/Sao_Paulo"
+        }
+        if os.path.exists("state.json"):
+            ctx_kwargs["storage_state"] = "state.json"
+
+        context = browser.new_context(**ctx_kwargs)
+        context.add_init_script("""
+            Object.defineProperty(navigator, 'webdriver', { get: () => false });
+            window.chrome = { runtime: {} };
+            Object.defineProperty(navigator, 'languages', { get: () => ['pt-BR', 'pt'] });
+            Object.defineProperty(navigator, 'plugins', { get: () => [1,2,3] });
+        """)
+        page = context.new_page()
+        if stealth_sync:
+            stealth_sync(page)
+
+        try:
+            # Acessa o portal e remove cookies
+            page.goto("https://portaldatransparencia.gov.br/pessoa/visao-geral", timeout=60000)
+            random_sleep()
+            # Lida com banner de cookies
+            try:
+                page.locator("#accept-minimal-btn").click(timeout=3000)
+                random_sleep(1, 2)
+            except:
+                page.evaluate("() => { const bar = document.getElementById('cookiebar'); if (bar) bar.remove(); }")
+                random_sleep()
+
+            # Seleciona pessoa física e preenche CPF
+            page.locator("#button-consulta-pessoa-fisica").click()
+            random_sleep()
+            page.locator("#termo").fill(termo_busca)
+            random_sleep()
+
+            # Aplica filtros refinados
+            page.locator("button[aria-controls='box-busca-refinada']").click()
+            page.wait_for_selector("#box-busca-refinada", timeout=15000)
+            random_sleep()
+            for fid in filtros_refino:
+                lbl = page.locator(f"label[for='{fid}']")
+                lbl.scroll_into_view_if_needed()
+                lbl.click()
+                random_sleep(0.5, 1.5)
+
+            # Executa consulta e abre primeiro resultado
+            page.locator("#btnConsultarPF").click()
+            page.wait_for_selector("#resultados .link-busca-nome", timeout=30000)
+            primeiro = page.locator("#resultados .link-busca-nome").first
+            primeiro.click()
+            page.wait_for_selector("section.dados-tabelados", timeout=30000)
+
+            # Coleta dados principais
+            nome = page.locator(".col-xs-12.col-sm-4 span").inner_text().strip()
+            spans = page.locator(".col-xs-12.col-sm-3 span").all_inner_texts()
+            cpf = spans[0].strip() if spans else ""
+            localidade = spans[1].strip() if len(spans) > 1 else ""
+
+            # Expande recebimentos
+            recv_btn = page.locator("button.header[aria-controls='accordion-recebimentos-recursos']")
+            recv_btn.wait_for(state="visible", timeout=15000)
+            recv_btn.scroll_into_view_if_needed()
+            random_sleep()
+            handle = recv_btn.element_handle()
+            if handle:
+                page.evaluate("btn => btn.click()", handle)
+            random_sleep(1, 2)
+            page.wait_for_selector("#accordion-recebimentos-recursos .responsive", timeout=15000)
+
+            beneficio = page.locator("#accordion-recebimentos-recursos .responsive strong").inner_text().strip()
+            valor = page.locator("#accordion-recebimentos-recursos .responsive tbody tr td:last-child").inner_text().strip()
+
+            # Screenshot dos dados principais
+            screenshot = page.screenshot(full_page=False)
+            img_b64 = base64.b64encode(screenshot).decode()
+
+            # Detalha
+            det_btn = page.locator("#btnDetalharBpc")
+            det_btn.wait_for(state="visible", timeout=15000)
+            det_btn.click()
+            page.wait_for_selector(".dados-detalhados", timeout=30000)
+            detalhes = page.locator(".dados-detalhados td").all_inner_texts()
+
+            # Paginação e tabela completa
+            page.locator("#btnPaginacaoCompleta").click()
+            random_sleep()
+            headers = [h.inner_text().strip() for h in page.query_selector_all("#tabelaDetalheDisponibilizado thead th")]
+            rows = page.query_selector_all("#tabelaDetalheDisponibilizado tbody tr")
+            tabela = [dict(zip(headers, [c.inner_text().strip() for c in row.query_selector_all("td span")])) for row in rows]
+
+            resultado = {
+                "nome": nome,
+                "cpf": cpf,
+                "localidade": localidade,
+                "beneficio": beneficio,
+                "valor": valor,
+                "detalhes": detalhes,
+                "tabela_completa": tabela,
+                "screenshot_base64": img_b64
+            }
+            return resultado
+
+        except Exception as e:
+            print(f"Erro: {e}")
+            return {}
+        finally:
+            context.close()
+            browser.close()
+
+
+def main(termos: List[str]):
+    worker = partial(consultar_e_abrir_primeiro, filtros_refino=["XX"])
+    with ProcessPoolExecutor(max_workers=4) as executor:
+        results = list(executor.map(worker, termos))
+    with open("todos_dados.json", "w", encoding="utf-8") as f:
+        json.dump(results, f, ensure_ascii=False, indent=2)
+
+if __name__ == "__main__":
+    cpfs = ["XX", "XX"]
+    main(cpfs)
