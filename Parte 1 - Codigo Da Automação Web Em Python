@@ -15,24 +15,23 @@ try:
 except ImportError:
     stealth_sync = None
 
-
 def random_sleep(min_sec: float = 1, max_sec: float = 3) -> None:
-    """
-    Adiciona uma pausa aleatória para simular comportamento humano.
-    """
     time.sleep(random.uniform(min_sec, max_sec))
 
+def is_cpf(val: str) -> bool:
+    return val.isdigit() and len(val) == 11
 
 def consultar_e_abrir_primeiro(termo_busca: str, filtros_refino: Optional[List[str]] = None) -> dict:
     if filtros_refino is None:
         filtros_refino = []
+
+    tipo_entrada = "CPF" if is_cpf(termo_busca) else "Nome"
 
     with sync_playwright() as p:
         browser = p.chromium.launch(
             headless=True,
             args=["--no-sandbox", "--disable-dev-shm-usage"]
         )
-        # Configurações do context
         ctx_kwargs = {
             "user_agent": (
                 "Mozilla/5.0 (Windows NT 10.0; Win64; x64) "
@@ -58,10 +57,9 @@ def consultar_e_abrir_primeiro(termo_busca: str, filtros_refino: Optional[List[s
             stealth_sync(page)
 
         try:
-            # Acessa o portal e remove cookies
             page.goto("https://portaldatransparencia.gov.br/pessoa/visao-geral", timeout=60000)
             random_sleep()
-            # Lida com banner de cookies
+
             try:
                 page.locator("#accept-minimal-btn").click(timeout=3000)
                 random_sleep(1, 2)
@@ -69,13 +67,11 @@ def consultar_e_abrir_primeiro(termo_busca: str, filtros_refino: Optional[List[s
                 page.evaluate("() => { const bar = document.getElementById('cookiebar'); if (bar) bar.remove(); }")
                 random_sleep()
 
-            # Seleciona pessoa física e preenche CPF
             page.locator("#button-consulta-pessoa-fisica").click()
             random_sleep()
             page.locator("#termo").fill(termo_busca)
             random_sleep()
 
-            # Aplica filtros refinados
             page.locator("button[aria-controls='box-busca-refinada']").click()
             page.wait_for_selector("#box-busca-refinada", timeout=15000)
             random_sleep()
@@ -85,20 +81,32 @@ def consultar_e_abrir_primeiro(termo_busca: str, filtros_refino: Optional[List[s
                 lbl.click()
                 random_sleep(0.5, 1.5)
 
-            # Executa consulta e abre primeiro resultado
             page.locator("#btnConsultarPF").click()
-            page.wait_for_selector("#resultados .link-busca-nome", timeout=30000)
+
+            try:
+                page.wait_for_selector("#resultados .link-busca-nome", timeout=15000)
+            except PlaywrightTimeoutError:
+                if page.is_visible(".alert-warning"):
+                    mensagem = page.locator(".alert-warning").inner_text()
+                    if "0 resultados" in mensagem:
+                        return {
+                            "status": f"Erro ({tipo_entrada})",
+                            "erro": f"Foram encontrados 0 resultados para o termo '{termo_busca}'"
+                        }
+                return {
+                    "status": f"Erro ({tipo_entrada})",
+                    "erro": "Não foi possível retornar os dados no tempo de resposta solicitado"
+                }
+
             primeiro = page.locator("#resultados .link-busca-nome").first
             primeiro.click()
             page.wait_for_selector("section.dados-tabelados", timeout=30000)
 
-            # Coleta dados principais
             nome = page.locator(".col-xs-12.col-sm-4 span").inner_text().strip()
             spans = page.locator(".col-xs-12.col-sm-3 span").all_inner_texts()
             cpf = spans[0].strip() if spans else ""
             localidade = spans[1].strip() if len(spans) > 1 else ""
 
-            # Expande recebimentos
             recv_btn = page.locator("button.header[aria-controls='accordion-recebimentos-recursos']")
             recv_btn.wait_for(state="visible", timeout=15000)
             recv_btn.scroll_into_view_if_needed()
@@ -112,18 +120,15 @@ def consultar_e_abrir_primeiro(termo_busca: str, filtros_refino: Optional[List[s
             beneficio = page.locator("#accordion-recebimentos-recursos .responsive strong").inner_text().strip()
             valor = page.locator("#accordion-recebimentos-recursos .responsive tbody tr td:last-child").inner_text().strip()
 
-            # Screenshot dos dados principais
             screenshot = page.screenshot(full_page=False)
             img_b64 = base64.b64encode(screenshot).decode()
 
-            # Detalha
             det_btn = page.locator("#btnDetalharBpc")
             det_btn.wait_for(state="visible", timeout=15000)
             det_btn.click()
             page.wait_for_selector(".dados-detalhados", timeout=30000)
             detalhes = page.locator(".dados-detalhados td").all_inner_texts()
 
-            # Paginação e tabela completa
             page.locator("#btnPaginacaoCompleta").click()
             random_sleep()
             headers = [h.inner_text().strip() for h in page.query_selector_all("#tabelaDetalheDisponibilizado thead th")]
@@ -131,6 +136,7 @@ def consultar_e_abrir_primeiro(termo_busca: str, filtros_refino: Optional[List[s
             tabela = [dict(zip(headers, [c.inner_text().strip() for c in row.query_selector_all("td span")])) for row in rows]
 
             resultado = {
+                "status": f"Sucesso ({tipo_entrada})",
                 "nome": nome,
                 "cpf": cpf,
                 "localidade": localidade,
@@ -144,19 +150,18 @@ def consultar_e_abrir_primeiro(termo_busca: str, filtros_refino: Optional[List[s
 
         except Exception as e:
             print(f"Erro: {e}")
-            return {}
+            return {"status": f"Erro ({tipo_entrada})", "erro": str(e)}
         finally:
             context.close()
             browser.close()
 
-
 def main(termos: List[str]):
-    worker = partial(consultar_e_abrir_primeiro, filtros_refino=["XX"])
+    worker = partial(consultar_e_abrir_primeiro, filtros_refino=["beneficiarioProgramaSocial"])
     with ProcessPoolExecutor(max_workers=4) as executor:
         results = list(executor.map(worker, termos))
     with open("todos_dados.json", "w", encoding="utf-8") as f:
         json.dump(results, f, ensure_ascii=False, indent=2)
 
 if __name__ == "__main__":
-    cpfs = ["XX", "XX"]
+    cpfs = ["x", "xx", "Nome de Teste", "Nome Que Nao Existe 123"]
     main(cpfs)
