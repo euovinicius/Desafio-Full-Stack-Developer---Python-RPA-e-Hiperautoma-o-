@@ -7,7 +7,14 @@ Ele permite enviar uma requisição via API, armazenar os dados no Google Drive 
 
 ## Funcionalidades
 
+- Robô hospedado em **ender.com**
+
+![image](https://github.com/user-attachments/assets/46479dac-db94-4d4f-83fe-30b19877c72a)
+
 - Realiza requisição à API do robô hospedado em **ender.com** utilizando o **Postman** ou outra ferramenta de automação.
+
+![image](https://github.com/user-attachments/assets/7e5507fb-f212-47b1-b3c0-142a4bd4b6f6)
+
 - Armazena automaticamente o arquivo JSON gerado no **Google Drive**, com nome padrão.
 - Atualiza um **Google Sheets** centralizado contendo:
   - Identificador único da consulta
@@ -32,6 +39,8 @@ Ele permite enviar uma requisição via API, armazenar os dados no Google Drive 
     - Salva o arquivo JSON recebido no Google Drive.
     - Gera o link público de acesso ao JSON.
     - Atualiza a planilha no Google Sheets com todas as informações da consulta.
+      
+![image](https://github.com/user-attachments/assets/6139c47b-e20e-4b67-9f18-1dc9524e33f4)
 
 ## Observações
 
