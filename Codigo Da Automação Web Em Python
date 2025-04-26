@@ -1,17 +1,3 @@
-# 1\. Sobre o Codigo.
-
-# Codigo criado para Automação Web , aonde o codigo faz a seguinte funcoes:
-
-* Acessar o Portal da Transparência e navegar até a consulta de "Pessoas Físicas e Jurídicas".
-* Insere os parâmetros ( Nome, Filtro de Busca , CPF ou NIS)  e realiza a busca.
-* Coletar os dados disponíveis na tela " Pessoa Física - Panorama da relação da pessoa com o Governo Federal".
-* Capturar uma imagem da tela como evidência e convertê-la para Base64.
-* Para cada benefício encontrado (Auxílio Brasil, Auxílio Emergencial, Bolsa Família), acessar os detalhes e coletar as informações.
-* Encerrar a automação e gerar um JSON contendo os dados coletados e a imagem Base64.
-
-
-
-
 import os
 import base64
 import json
