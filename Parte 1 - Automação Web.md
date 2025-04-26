@@ -10,6 +10,7 @@ Este projeto é uma automação web feita com Playwright que realiza as seguinte
 - Captura uma imagem da tela como evidência e converte para Base64.
 - Para cada benefício encontrado (Auxílio Brasil, Auxílio Emergencial, Bolsa Família), acessa os detalhes e coleta as informações.
 - Encerra a automação e gera um arquivo JSON contendo os dados coletados e a imagem Base64.
+-  Funciona em modo headless e permitir execuções simultâneas .
 
 ## Tecnologias utilizadas
 
@@ -18,4 +19,6 @@ Este projeto é uma automação web feita com Playwright que realiza as seguinte
 - Concurrent Futures (ProcessPoolExecutor)
 - Pillow (para manipulação de imagens)
 
+
+![image](https://github.com/user-attachments/assets/f5c3e64b-695c-448d-aee4-9da8f08dc59b)
 
